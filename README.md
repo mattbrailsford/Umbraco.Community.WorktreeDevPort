@@ -38,7 +38,7 @@ const port = getPort();
 
 ## Status
 
-🧪 Pre-release (`0.1.1`). npm published manually to bootstrap trusted publishing; NuGet not yet published.
+🧪 Pre-release (`0.1.2`). Both packages publish through the release pipeline via trusted publishing.
 
 ## Releasing
 
