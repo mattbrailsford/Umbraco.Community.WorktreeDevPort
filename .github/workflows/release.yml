@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-nuget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Nerdbank.GitVersioning needs full history to compute the version
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - run: dotnet restore Umbraco.Community.WorktreeDevPort.slnx
+
+      - run: dotnet build Umbraco.Community.WorktreeDevPort.slnx -c Release --no-restore
+
+      - run: >
+          dotnet pack src/Umbraco.Community.WorktreeDevPort/Umbraco.Community.WorktreeDevPort.csproj
+          -c Release --no-build -o ./artifacts
+
+      - run: >
+          dotnet nuget push "./artifacts/*.nupkg"
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # for npm provenance
+    defaults:
+      run:
+        working-directory: packages/worktree-dev-port
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

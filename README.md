@@ -40,6 +40,21 @@ const port = getPort();
 
 🧪 Pre-release (`0.1.0-alpha`). Built and working locally; not yet published to NuGet or npm.
 
+## Releasing
+
+A GitHub Actions workflow (`.github/workflows/release.yml`) publishes both packages whenever a GitHub Release is published. Before publishing, it needs two repo secrets:
+
+- `NUGET_API_KEY` — a nuget.org API key scoped to this package
+- `NPM_TOKEN` — an npm automation token with publish rights
+
+Add them under **Settings → Secrets and variables → Actions**, or with `gh secret set NUGET_API_KEY` / `gh secret set NPM_TOKEN`.
+
+To cut a release:
+
+1. Bump `packages/worktree-dev-port/package.json`'s `version` (the .NET package's version comes from `version.json` + Nerdbank.GitVersioning automatically).
+2. Commit and push to `main`.
+3. Create a GitHub Release with a tag (e.g. `v0.1.0`) and publish it — this triggers the workflow.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
