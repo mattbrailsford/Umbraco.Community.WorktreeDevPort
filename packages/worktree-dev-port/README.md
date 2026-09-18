@@ -18,6 +18,10 @@ const port = getPort();
 
 // Or, to assign one yourself if nothing has yet:
 const port = await getOrAssignPort();
+
+// getOrAssignPort(basePort, rangeSize, mainWorktreePort) also accepts overrides.
+// The main checkout gets mainWorktreePort (44355 by default) when it's free;
+// pass null to always use the pool instead.
 ```
 
 See the [root README](../../README.md) for how this fits with the .NET side.

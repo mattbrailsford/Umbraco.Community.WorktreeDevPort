@@ -12,7 +12,7 @@ That's it — the composer is picked up automatically by Umbraco and only activa
 
 ## How it works
 
-- The first time the site starts in a given worktree, it picks a free port in `44300`–`44399` and saves it with `git config --worktree wdp.port <port>`.
+- The first time the site starts in a given worktree, it picks a free port and saves it with `git config --worktree wdp.port <port>`. The **main checkout** gets `44355` when it's free; every **linked worktree** gets the first free port from `44300` up instead, so `44355` stays reserved.
 - That value lives in the worktree's own git config (`.git/config.worktree` or `.git/worktrees/<name>/config.worktree`) — never in a tracked file, never in `/tmp`.
 - Every later run in that same worktree reuses the same port.
 - Removing the worktree (`git worktree remove`) deletes the saved port with it. Nothing to clean up by hand.
@@ -28,12 +28,15 @@ Optional, in `appsettings.Development.json`:
 {
   "WorktreeDevPort": {
     "BasePort": 44300,
-    "RangeSize": 100
+    "RangeSize": 100,
+    "MainWorktreePort": 44355
   }
 }
 ```
 
-If `ASPNETCORE_URLS` (or `urls`) is already set, this package leaves it alone.
+Set `MainWorktreePort` to `null` to disable the fixed-port reservation and always use the pool.
+
+If `ASPNETCORE_URLS` (or `urls`) is already set to a real fixed port, this package leaves it alone. A `:0` port (the old "ask the OS for a random port" trick) is treated the same as no URL being set at all — this package's whole job is to replace that.
 
 ## License
 

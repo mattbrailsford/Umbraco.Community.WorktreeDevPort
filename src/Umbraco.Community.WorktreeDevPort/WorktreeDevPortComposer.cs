@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Hosting;
@@ -37,38 +38,53 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     public const int DefaultBasePort = 44300;
     public const int DefaultRangeSize = 100;
 
+    /// <summary>
+    /// The port reserved for the main checkout (not a linked worktree), used when free.
+    /// Set to <c>null</c> to disable this and always use the auto-assigned pool.
+    /// </summary>
+    public const int DefaultMainWorktreePort = 44355;
+
     public void Configure(KestrelServerOptions options)
     {
         if (!hostEnvironment.IsDevelopment())
             return;
 
-        // Respect an explicit URL/port if one was configured, rather than overriding it.
+        // Respect explicit fixed URLs/ports, rather than overriding them. A ":0" port means
+        // "give the OS pick a dynamic one" -- that's exactly what this package exists to
+        // replace, so treat it the same as no URL being configured at all.
         var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"];
         if (!string.IsNullOrEmpty(urls))
         {
-            foreach (var url in urls.Split(';'))
+            var parsedUrls = urls.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(u => new Uri(u)).ToList();
+
+            if (parsedUrls.Count > 0 && parsedUrls.All(u => u.Port != 0))
             {
-                var uri = new Uri(url);
-                options.Listen(IPAddress.Loopback, uri.Port, o =>
+                foreach (var uri in parsedUrls)
                 {
-                    if (uri.Scheme == "https")
-                        o.UseHttps();
-                });
+                    options.Listen(IPAddress.Loopback, uri.Port, o =>
+                    {
+                        if (uri.Scheme == "https")
+                            o.UseHttps();
+                    });
+                }
+                return;
             }
-            return;
         }
 
         var basePort = configuration.GetValue("WorktreeDevPort:BasePort", DefaultBasePort);
         var rangeSize = configuration.GetValue("WorktreeDevPort:RangeSize", DefaultRangeSize);
+        var mainWorktreePort = configuration.GetValue<int?>("WorktreeDevPort:MainWorktreePort", DefaultMainWorktreePort);
 
-        options.Listen(IPAddress.Loopback, GetOrAssignPort(basePort, rangeSize), o => o.UseHttps());
+        options.Listen(IPAddress.Loopback, GetOrAssignPort(basePort, rangeSize, mainWorktreePort), o => o.UseHttps());
     }
 
     /// <summary>
-    /// Returns the port already assigned to this worktree, or picks the first free port
-    /// in range and saves it so future runs (and other tools) reuse the same one.
+    /// Returns the port already assigned to this worktree, or picks one and saves it so future
+    /// runs (and other tools) reuse the same one. The main checkout gets <paramref name="mainWorktreePort"/>
+    /// when it's free and not already claimed; every worktree gets the first free port from
+    /// <paramref name="basePort"/> up, skipping <paramref name="mainWorktreePort"/> so it stays reserved.
     /// </summary>
-    public static int GetOrAssignPort(int basePort = DefaultBasePort, int rangeSize = DefaultRangeSize)
+    public static int GetOrAssignPort(int basePort = DefaultBasePort, int rangeSize = DefaultRangeSize, int? mainWorktreePort = DefaultMainWorktreePort)
     {
         // Enables per-worktree config files; harmless if already set. This itself lives in
         // the shared .git/config, so it only ever needs to succeed once per clone.
@@ -78,8 +94,17 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
         if (int.TryParse(existing, out var existingPort))
             return existingPort;
 
+        if (mainWorktreePort is int fixedPort && !IsLinkedWorktree() && IsPortFree(fixedPort))
+        {
+            RunGit($"config --worktree {ConfigKey} {fixedPort}");
+            return fixedPort;
+        }
+
         for (var port = basePort; port < basePort + rangeSize; port++)
         {
+            if (port == mainWorktreePort)
+                continue;
+
             if (IsPortFree(port))
             {
                 RunGit($"config --worktree {ConfigKey} {port}");
@@ -88,6 +113,24 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
         }
 
         throw new InvalidOperationException($"No free port found in range {basePort}-{basePort + rangeSize - 1}.");
+    }
+
+    private static bool IsLinkedWorktree()
+    {
+        // For the main checkout, --git-dir and --git-common-dir are the same path.
+        // A linked worktree has its own private --git-dir under the shared repo's
+        // .git/worktrees/<name>, so the two differ. Comparing them avoids relying
+        // on "worktrees" appearing in the path, which the repo's own folder name could
+        // also trigger by coincidence.
+        var gitDir = RunGit("rev-parse --git-dir");
+        var commonDir = RunGit("rev-parse --git-common-dir");
+
+        // No git repo (or git unavailable) here at all -- treat like the main checkout
+        // rather than throwing, matching RunGit's own fail-safe-empty behavior.
+        if (string.IsNullOrEmpty(gitDir) || string.IsNullOrEmpty(commonDir))
+            return false;
+
+        return !string.Equals(Path.GetFullPath(gitDir), Path.GetFullPath(commonDir), StringComparison.Ordinal);
     }
 
     private static bool IsPortFree(int port)

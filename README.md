@@ -36,9 +36,33 @@ import { getPort } from "worktree-dev-port";
 const port = getPort();
 ```
 
+## The main checkout gets a fixed port
+
+Your main checkout (not a linked worktree) gets `44355` when it's free, so a human working normally always finds the site at the same familiar address. Linked worktrees skip straight to the auto-assigned pool (`44300` upward) and never take `44355`, so it stays reserved.
+
+Pass `null`/`0` to disable this and always use the pool:
+
+```csharp
+options.Listen(IPAddress.Loopback, WorktreeDevPortKestrelConfiguration.GetOrAssignPort(mainWorktreePort: null), o => o.UseHttps());
+```
+
+```js
+const port = await getOrAssignPort(44300, 100, null);
+```
+
+Or via config, without touching code:
+
+```json
+{ "WorktreeDevPort": { "MainWorktreePort": null } }
+```
+
+## If your launch profile already sets a `:0` port
+
+`applicationUrl: "https://127.0.0.1:0"` (the old "let the OS pick a random port" trick) is exactly what this package replaces. If one's still configured — an old profile, a copy-pasted example — the .NET package detects the `:0` and ignores it, assigning its own stable port instead of letting the OS hand back a random one. Any *other* explicit fixed port is still respected as-is.
+
 ## Status
 
-🧪 Pre-release (`0.1.2`). Both packages publish through the release pipeline via trusted publishing.
+🧪 Pre-release (`0.3.0`). Both packages publish through the release pipeline via trusted publishing.
 
 ## Releasing
 
