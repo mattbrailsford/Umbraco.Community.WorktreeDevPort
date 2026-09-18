@@ -42,12 +42,19 @@ const port = getPort();
 
 ## Releasing
 
-A GitHub Actions workflow (`.github/workflows/release.yml`) publishes both packages whenever a GitHub Release is published. Before publishing, it needs two repo secrets:
+A GitHub Actions workflow (`.github/workflows/release.yml`) publishes both packages whenever a GitHub Release is published. It uses **Trusted Publishing** (OIDC) for both registries — no long-lived API keys or tokens stored in this repo.
 
-- `NUGET_API_KEY` — a nuget.org API key scoped to this package
-- `NPM_TOKEN` — an npm automation token with publish rights
+One-time setup before the first release:
 
-Add them under **Settings → Secrets and variables → Actions**, or with `gh secret set NUGET_API_KEY` / `gh secret set NPM_TOKEN`.
+- **npm**: once `worktree-dev-port` exists as a package on npmjs.com (or even before its first publish), go to its Settings → Trusted Publisher and add:
+  - Organization or user: `mattbrailsford`
+  - Repository: `Umbraco.Community.WorktreeDevPort`
+  - Workflow filename: `release.yml`
+- **NuGet**: on nuget.org, open your username menu → Trusted Publishing → add a policy:
+  - Repository Owner: `mattbrailsford`
+  - Repository: `Umbraco.Community.WorktreeDevPort`
+  - Workflow File: `release.yml`
+- Optionally add a `NUGET_USER` repo secret set to your nuget.org profile name (not your email — this isn't a credential, just avoids hardcoding the username in the workflow).
 
 To cut a release:
 
