@@ -26,7 +26,7 @@ dotnet add package Umbraco.Community.WorktreeDevPort
 Start the site in Development. It'll pick a port once and reuse it from then on. Any other tool can ask for it:
 
 ```bash
-git config --worktree --get worktreedevport.port
+git config --worktree --get wdp.port
 ```
 
 Or from Node:

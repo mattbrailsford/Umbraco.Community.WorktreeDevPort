@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import net from "node:net";
 
-export const CONFIG_KEY = "worktreedevport.port";
+export const CONFIG_KEY = "wdp.port";
 export const DEFAULT_BASE_PORT = 44300;
 export const DEFAULT_RANGE_SIZE = 100;
 

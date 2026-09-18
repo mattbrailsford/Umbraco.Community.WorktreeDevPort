@@ -1,6 +1,6 @@
 {
   "name": "worktree-dev-port",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Give every git worktree its own stable local dev port, discoverable by any tool with a plain `git config` call. No pipe, no socket, no discovery endpoint.",
   "type": "module",
   "main": "index.js",

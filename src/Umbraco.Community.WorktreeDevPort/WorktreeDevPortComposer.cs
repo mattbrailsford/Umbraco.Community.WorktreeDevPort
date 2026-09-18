@@ -33,7 +33,7 @@ public class WorktreeDevPortComposer : IComposer
 public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironment, IConfiguration configuration)
     : IConfigureOptions<KestrelServerOptions>
 {
-    public const string ConfigKey = "worktreedevport.port";
+    public const string ConfigKey = "wdp.port";
     public const int DefaultBasePort = 44300;
     public const int DefaultRangeSize = 100;
 
