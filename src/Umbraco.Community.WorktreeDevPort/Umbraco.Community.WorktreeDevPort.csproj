@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Title>Umbraco Worktree Dev Port</Title>
+    <Description>Gives every git worktree its own stable local dev port for an Umbraco site, discoverable by any tool via `git config` — no pipe, socket, or running discovery endpoint needed.</Description>
+    <Company>Matt Brailsford</Company>
+    <Authors>Matt Brailsford</Authors>
+    <Copyright>Copyright © Matt Brailsford $([System.DateTime]::Today.ToString('yyyy'))</Copyright>
+    <Product>Umbraco Worktree Dev Port</Product>
+    <PackageProjectUrl>https://github.com/mattbrailsford/Umbraco.Community.WorktreeDevPort</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/mattbrailsford/Umbraco.Community.WorktreeDevPort</RepositoryUrl>
+    <PackageTags>umbraco dev-tools git-worktree port umbraco-marketplace</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Umbraco.Cms.Web.Common" Version="[17.0.0, 19.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+</Project>
