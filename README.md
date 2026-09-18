@@ -46,11 +46,14 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) publishes both packa
 
 One-time setup before the first release:
 
-- **npm**: once `worktree-dev-port` exists as a package on npmjs.com (or even before its first publish), go to its Settings → Trusted Publisher and add:
-  - Organization or user: `mattbrailsford`
-  - Repository: `Umbraco.Community.WorktreeDevPort`
-  - Workflow filename: `release.yml`
-- **NuGet**: on nuget.org, open your username menu → Trusted Publishing → add a policy:
+- **npm — the very first publish must be manual.** npm's OIDC trusted publishing can't create a brand-new package, only publish new versions of one that already exists. So before the workflow can help:
+  1. `cd packages/worktree-dev-port && npm login && npm publish --access public` from your own machine, once.
+  2. Then go to the package's Settings → Trusted Publisher on npmjs.com and add:
+     - Organization or user: `mattbrailsford`
+     - Repository: `Umbraco.Community.WorktreeDevPort`
+     - Workflow filename: `release.yml`
+  3. Every release after that publishes through the workflow via OIDC — no more manual `npm publish`.
+- **NuGet** doesn't have this limitation — a Trusted Publishing policy is tied to your account/org, not to a package that already exists, so it covers the first publish too. On nuget.org, open your username menu → Trusted Publishing → add a policy:
   - Repository Owner: `mattbrailsford`
   - Repository: `Umbraco.Community.WorktreeDevPort`
   - Workflow File: `release.yml`
