@@ -38,7 +38,7 @@ const port = getPort();
 
 ## Status
 
-🧪 Pre-release (`0.1.0`). Built and working locally; not yet published to NuGet or npm.
+🧪 Pre-release (`0.1.1`). npm published manually to bootstrap trusted publishing; NuGet not yet published.
 
 ## Releasing
 
