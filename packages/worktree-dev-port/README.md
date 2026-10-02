@@ -1,6 +1,6 @@
 # worktree-dev-port
 
-Node-side helper for [Umbraco.Community.WorktreeDevPort](https://github.com/mattbrailsford/Umbraco.Community.WorktreeDevPort). Reads or assigns the local dev port stored in the current git worktree's own config — no pipe, socket, or running discovery endpoint required.
+Node-side helper for [Umbraco.Community.WorktreeDevPort](https://github.com/mattbrailsford/Umbraco.Community.WorktreeDevPort). Reads or assigns the local dev port stored in the current git worktree's own git folder — no pipe, socket, or running discovery endpoint required.
 
 ## Install
 
@@ -13,7 +13,8 @@ npm install worktree-dev-port
 ```js
 import { getPort, getOrAssignPort } from "worktree-dev-port";
 
-// If something else (e.g. the paired NuGet package) already assigned a port:
+// If something else (e.g. the paired NuGet package) already assigned a port.
+// Throws if this worktree has no port yet:
 const port = getPort();
 
 // Or, to assign one yourself if nothing has yet:
