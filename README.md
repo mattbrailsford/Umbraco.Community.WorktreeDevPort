@@ -1,6 +1,6 @@
 # Umbraco.Community.WorktreeDevPort
 
-Gives every git worktree its own stable local dev port — discoverable by any tool with a plain `git config` call. No named pipe, no Unix socket, no discovery endpoint to run and query.
+Gives every git worktree its own stable local dev port — discoverable by any tool with a plain `git wdp-port` call. No named pipe, no Unix socket, no discovery endpoint to run and query.
 
 This started as a fix for a real problem: running an Umbraco demo site from several feature-branch worktrees at once, where each one needs its own port, and both a human and an AI agent need an easy way to find out which port belongs to which worktree.
 
@@ -8,14 +8,15 @@ This started as a fix for a real problem: running an Umbraco demo site from seve
 
 | Package | For | What it does |
 |---|---|---|
-| [`Umbraco.Community.WorktreeDevPort`](src/Umbraco.Community.WorktreeDevPort) | .NET / the Umbraco site | Picks a free port on first run in a worktree, saves it to that worktree's git config, and makes Kestrel listen on it every time after. |
-| [`worktree-dev-port`](packages/worktree-dev-port) | Node.js tooling (client generators, scripts, CI) | Reads (or assigns) the same port from the same git config, so it always agrees with the .NET side. |
+| [`Umbraco.Community.WorktreeDevPort`](src/Umbraco.Community.WorktreeDevPort) | .NET / the Umbraco site | Picks a free port on first run in a worktree, saves it in that worktree's own git folder, and makes Kestrel listen on it every time after. |
+| [`worktree-dev-port`](packages/worktree-dev-port) | Node.js tooling (client generators, scripts, CI) | Reads (or assigns) the same port from the same place, so it always agrees with the .NET side. |
 
-## Why git config, not a file, a hash, or a pipe
+## Why a file in the worktree's git folder, not a hash, a pipe, or git config
 
 - **A file in the repo or a socket in `/tmp`** — leaves something behind to clean up, and can go stale after a crash.
 - **A port number derived from the branch name (a hash)** — needs no storage at all, but two different branch names can land on the same number by chance. Fine for one team's own repos; risky once it's a public tool other people's branch names run through.
-- **`git config --worktree`** — no files in your project, no sockets, no collisions (a free port is actually checked before being assigned), and cleanup is automatic: removing the worktree removes the saved port with it.
+- **`git config --worktree`** — looks ideal, but `git worktree add` copies the current worktree's config into the new one. A fresh worktree then reports another worktree's port, and a tool quietly talks to the wrong site.
+- **A `wdp-port` file in the worktree's own git folder** (`.git/wdp-port`, or `.git/worktrees/<name>/wdp-port` for a linked worktree) — no files in your project, no sockets, no collisions (a port is only assigned if it's free and no other worktree has it saved), never copied into a new worktree, and cleanup is automatic: removing the worktree removes the saved port with it.
 
 ## Quick start
 
@@ -26,7 +27,13 @@ dotnet add package Umbraco.Community.WorktreeDevPort
 Start the site in Development. It'll pick a port once and reuse it from then on. Any other tool can ask for it:
 
 ```bash
-git config --worktree --get wdp.port
+git wdp-port
+```
+
+That's a git alias the package adds to the repo's shared config the first time it runs, so it works in every worktree of that repo. No output means this worktree has no port yet: start the site first. Before the alias exists (a fresh clone where nothing has run yet), the same lookup is:
+
+```bash
+cat "$(git rev-parse --git-path wdp-port)"
 ```
 
 Or from Node:
@@ -35,6 +42,10 @@ Or from Node:
 import { getPort } from "worktree-dev-port";
 const port = getPort();
 ```
+
+## Upgrading from 0.3.0 or earlier
+
+Older versions saved the port with `git config --worktree wdp.port`. That value is no longer read, so every worktree picks its port again the first time it starts after upgrading. The main checkout gets `44355` back if it's free. Anything that read `wdp.port` directly should switch to `git wdp-port`.
 
 ## The main checkout gets a fixed port
 

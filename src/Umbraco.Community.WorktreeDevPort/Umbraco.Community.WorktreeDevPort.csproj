@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <Title>Umbraco Worktree Dev Port</Title>
-    <Description>Gives every git worktree its own stable local dev port for an Umbraco site, discoverable by any tool via `git config` — no pipe, socket, or running discovery endpoint needed.</Description>
+    <Description>Gives every git worktree its own stable local dev port for an Umbraco site, discoverable by any tool via `git wdp-port` — no pipe, socket, or running discovery endpoint needed.</Description>
     <Company>Matt Brailsford</Company>
     <Authors>Matt Brailsford</Authors>
     <Copyright>Copyright © Matt Brailsford $([System.DateTime]::Today.ToString('yyyy'))</Copyright>
