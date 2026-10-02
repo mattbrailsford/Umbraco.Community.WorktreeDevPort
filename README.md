@@ -73,7 +73,7 @@ Or via config, without touching code:
 
 ## Status
 
-🧪 Pre-release (`0.3.0`). Both packages publish through the release pipeline via trusted publishing.
+🧪 Pre-release (`0.4.0`). Both packages publish through the release pipeline via trusted publishing.
 
 ## Releasing
 
