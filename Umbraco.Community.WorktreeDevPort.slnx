@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Umbraco.Community.WorktreeDevPort/Umbraco.Community.WorktreeDevPort.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Umbraco.Community.WorktreeDevPort.Tests/Umbraco.Community.WorktreeDevPort.Tests.csproj" />
+  </Folder>
 </Solution>

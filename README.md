@@ -18,6 +18,8 @@ This started as a fix for a real problem: running an Umbraco demo site from seve
 - **`git config --worktree`** — looks ideal, but `git worktree add` copies the current worktree's config into the new one. A fresh worktree then reports another worktree's port, and a tool quietly talks to the wrong site.
 - **A `wdp-port` file in the worktree's own git folder** (`.git/wdp-port`, or `.git/worktrees/<name>/wdp-port` for a linked worktree) — no files in your project, no sockets, no collisions (a port is only assigned if it's free and no other worktree has it saved), never copied into a new worktree, and cleanup is automatic: removing the worktree removes the saved port with it.
 
+Picking and saving a port happens under a short lock (`.git/wdp-port.lock`), so several worktrees starting at the same moment still get different ports. A lock left behind by a crashed process is ignored after 30 seconds.
+
 ## Quick start
 
 ```bash
@@ -74,6 +76,15 @@ Or via config, without touching code:
 ## Status
 
 🧪 Pre-release (`0.4.0`). Both packages publish through the release pipeline via trusted publishing.
+
+## Tests
+
+```bash
+dotnet test Umbraco.Community.WorktreeDevPort.slnx
+cd packages/worktree-dev-port && npm test
+```
+
+Both suites run against real throwaway git repos and worktrees. `tests/shared/saved-port-cases.json` is read by both, so the .NET and Node packages always agree on what a saved port file means. The `CI` workflow runs both on every push and pull request.
 
 ## Releasing
 

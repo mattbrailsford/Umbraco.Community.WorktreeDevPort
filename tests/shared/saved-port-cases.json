@@ -1,0 +1,19 @@
+[
+  { "text": "44300", "port": 44300 },
+  { "text": "44300\n", "port": 44300 },
+  { "text": "44300\r\n", "port": 44300 },
+  { "text": "  44300  ", "port": 44300 },
+  { "text": "0443", "port": 443 },
+  { "text": "1", "port": 1 },
+  { "text": "65535", "port": 65535 },
+  { "text": "", "port": null },
+  { "text": "   \n", "port": null },
+  { "text": "junk", "port": null },
+  { "text": "443abc", "port": null },
+  { "text": "+443", "port": null },
+  { "text": "-5", "port": null },
+  { "text": "4.43", "port": null },
+  { "text": "0", "port": null },
+  { "text": "65536", "port": null },
+  { "text": "99999999999", "port": null }
+]

@@ -35,9 +35,9 @@ Optional, in `appsettings.Development.json`:
 }
 ```
 
-Set `MainWorktreePort` to `null` to disable the fixed-port reservation and always use the pool.
+Set `MainWorktreePort` to `null` (or `0`) to disable the fixed-port reservation and always use the pool.
 
-If `ASPNETCORE_URLS` (or `urls`) is already set to a real fixed port, this package leaves it alone. A `:0` port (the old "ask the OS for a random port" trick) is treated the same as no URL being set at all — this package's whole job is to replace that.
+If `ASPNETCORE_URLS` (or `urls`) is already set to a real fixed port, this package leaves it alone. A `:0` port (the old "ask the OS for a random port" trick) is treated the same as no URL being set at all — this package's whole job is to replace that. Wildcard hosts such as `http://*:5000` and `https://+:443` count as fixed ports too.
 
 ## License
 
