@@ -10,6 +10,12 @@ import path from "node:path";
 export const PORT_FILE_NAME = "wdp-port";
 
 /**
+ * The file, inside the repo's shared git dir, that only one worktree at a time can hold
+ * while it picks and saves a port.
+ */
+export const LOCK_FILE_NAME = "wdp-port.lock";
+
+/**
  * The git alias added to the repo's shared config, so any tool can read the current
  * worktree's port with `git wdp-port`.
  */
@@ -23,6 +29,12 @@ export const DEFAULT_RANGE_SIZE = 100;
  * Pass `null` to disable this and always use the auto-assigned pool.
  */
 export const DEFAULT_MAIN_WORKTREE_PORT = 44355;
+
+const MAX_PORT = 65535;
+const LOCK_TIMEOUT_MS = 10_000;
+
+/** A lock older than this was left behind by a process that died while holding it. */
+const STALE_LOCK_AGE_MS = 30_000;
 
 /**
  * Returns the port already assigned to this worktree. Throws if nothing has
@@ -47,6 +59,10 @@ export function getPort() {
  * `mainWorktreePort` so it stays reserved, and skipping any port another worktree already has saved.
  */
 export async function getOrAssignPort(basePort = DEFAULT_BASE_PORT, rangeSize = DEFAULT_RANGE_SIZE, mainWorktreePort = DEFAULT_MAIN_WORKTREE_PORT) {
+    if (!Number.isInteger(basePort) || !Number.isInteger(rangeSize) || basePort < 1 || rangeSize < 1 || basePort + rangeSize - 1 > MAX_PORT) {
+        throw new RangeError(`Port range ${basePort}-${basePort + rangeSize - 1} must sit within 1-${MAX_PORT}.`);
+    }
+
     ensureGitAlias();
 
     const dirs = getGitDirs();
@@ -55,21 +71,74 @@ export async function getOrAssignPort(basePort = DEFAULT_BASE_PORT, rangeSize = 
     const existing = portFile ? readPortFile(portFile) : null;
     if (existing !== null) return existing;
 
-    const isLinked = dirs ? dirs.gitDir !== dirs.commonDir : false;
-    const takenByOthers = dirs ? getPortsSavedByOtherWorktrees(dirs.gitDir, dirs.commonDir) : new Set();
+    // Picking and saving must happen as one step, or two worktrees starting at the same
+    // moment can both see the same port as free and both save it.
+    const releaseLock = dirs ? await acquireAssignLock(dirs.commonDir) : () => {};
+    try {
+        // Another process in this same worktree may have saved a port while we waited.
+        const savedWhileWaiting = portFile ? readPortFile(portFile) : null;
+        if (savedWhileWaiting !== null) return savedWhileWaiting;
 
-    if (mainWorktreePort && !isLinked && (await isPortFree(mainWorktreePort))) {
-        return savePort(portFile, mainWorktreePort);
+        const isLinked = dirs ? dirs.gitDir !== dirs.commonDir : false;
+        const takenByOthers = dirs ? getPortsSavedByOtherWorktrees(dirs.gitDir, dirs.commonDir) : new Set();
+
+        if (mainWorktreePort && !isLinked && (await isPortFree(mainWorktreePort))) {
+            return savePort(portFile, mainWorktreePort);
+        }
+
+        for (let port = basePort; port < basePort + rangeSize; port++) {
+            if (port === mainWorktreePort || takenByOthers.has(port)) continue;
+            if (await isPortFree(port)) {
+                return savePort(portFile, port);
+            }
+        }
+
+        throw new Error(`No free port found in range ${basePort}-${basePort + rangeSize - 1}.`);
+    } finally {
+        releaseLock();
     }
+}
 
-    for (let port = basePort; port < basePort + rangeSize; port++) {
-        if (port === mainWorktreePort || takenByOthers.has(port)) continue;
-        if (await isPortFree(port)) {
-            return savePort(portFile, port);
+/**
+ * Takes the repo-wide lock, waiting for whoever holds it, and returns a function that
+ * releases it. One left behind by a crashed process is removed once it's older than
+ * STALE_LOCK_AGE_MS. Matches the .NET package's lock, so both sides wait for each other.
+ */
+async function acquireAssignLock(commonDir) {
+    const lockFile = path.join(commonDir, LOCK_FILE_NAME);
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+    while (true) {
+        try {
+            const fd = fs.openSync(lockFile, "wx");
+            return () => {
+                fs.closeSync(fd);
+                fs.rmSync(lockFile, { force: true });
+            };
+        } catch (error) {
+            if (error.code !== "EEXIST" && error.code !== "EPERM") throw error;
+            if (Date.now() >= deadline) {
+                throw new Error(
+                    `Another process held '${lockFile}' for over ${LOCK_TIMEOUT_MS / 1000} seconds. If nothing else is starting, delete that file.`
+                );
+            }
+
+            if (isStale(lockFile)) {
+                fs.rmSync(lockFile, { force: true });
+                continue;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 50));
         }
     }
+}
 
-    throw new Error(`No free port found in range ${basePort}-${basePort + rangeSize - 1}.`);
+function isStale(lockFile) {
+    try {
+        return Date.now() - fs.statSync(lockFile).mtimeMs > STALE_LOCK_AGE_MS;
+    } catch {
+        return false;
+    }
 }
 
 function savePort(portFile, port) {
@@ -77,10 +146,21 @@ function savePort(portFile, port) {
     return port;
 }
 
+/**
+ * Parses a saved port. Only plain digits in the range 1-65535 count; anything else
+ * (junk, a sign, a trailing suffix, 0) is treated as no saved port, so a fresh one is picked.
+ * Matches the .NET package's ParsePort, so both sides agree on what's saved.
+ */
+function parsePort(text) {
+    const trimmed = text.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const port = Number(trimmed);
+    return port >= 1 && port <= MAX_PORT ? port : null;
+}
+
 function readPortFile(file) {
     if (!fs.existsSync(file)) return null;
-    const port = parseInt(fs.readFileSync(file, "utf-8").trim(), 10);
-    return Number.isNaN(port) ? null : port;
+    return parsePort(fs.readFileSync(file, "utf-8"));
 }
 
 function ensureGitAlias() {

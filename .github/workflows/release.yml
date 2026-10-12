@@ -26,6 +26,8 @@ jobs:
 
       - run: dotnet build Umbraco.Community.WorktreeDevPort.slnx -c Release --no-restore
 
+      - run: dotnet test Umbraco.Community.WorktreeDevPort.slnx -c Release --no-build
+
       - run: >
           dotnet pack src/Umbraco.Community.WorktreeDevPort/Umbraco.Community.WorktreeDevPort.csproj
           -c Release --no-build -o ./artifacts
@@ -59,6 +61,8 @@ jobs:
         with:
           node-version: "22" # trusted publishing needs Node >= 22.14 and npm >= 11.5.1
           registry-url: "https://registry.npmjs.org"
+
+      - run: npm test
 
       - run: npm install -g npm@latest
 

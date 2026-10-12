@@ -1,7 +1,8 @@
 using System.Diagnostics;
-using System.Linq;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
@@ -42,6 +43,12 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     public const string PortFileName = "wdp-port";
 
     /// <summary>
+    /// The file, inside the repo's shared git dir, that only one worktree at a time can hold
+    /// while it picks and saves a port.
+    /// </summary>
+    public const string LockFileName = "wdp-port.lock";
+
+    /// <summary>
     /// The git alias this package adds to the repo's shared config, so any tool can read the
     /// current worktree's port with <c>git wdp-port</c>.
     /// </summary>
@@ -56,31 +63,40 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     /// </summary>
     public const int DefaultMainWorktreePort = 44355;
 
+    private const int MaxPort = 65535;
+
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// A lock older than this was left behind by a process that died while holding it.
+    /// </summary>
+    private static readonly TimeSpan StaleLockAge = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Matches an ASP.NET Core URL such as <c>https://localhost:5001</c>. Unlike <see cref="Uri"/>,
+    /// it also accepts the wildcard hosts ASP.NET Core allows (<c>http://*:5000</c>, <c>https://+:443</c>).
+    /// </summary>
+    private static readonly Regex UrlPattern = new(
+        @"^(?<scheme>https?)://(?<host>\[[^\]]*\]|[^:/]+)(?::(?<port>\d{1,5}))?(?:/.*)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     public void Configure(KestrelServerOptions options)
     {
         if (!hostEnvironment.IsDevelopment())
             return;
 
-        // Respect explicit fixed URLs/ports, rather than overriding them. A ":0" port means
-        // "give the OS pick a dynamic one" -- that's exactly what this package exists to
-        // replace, so treat it the same as no URL being configured at all.
-        var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"];
-        if (!string.IsNullOrEmpty(urls))
+        var fixedEndpoints = GetFixedEndpoints(configuration["ASPNETCORE_URLS"] ?? configuration["urls"]);
+        if (fixedEndpoints is not null)
         {
-            var parsedUrls = urls.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(u => new Uri(u)).ToList();
-
-            if (parsedUrls.Count > 0 && parsedUrls.All(u => u.Port != 0))
+            foreach (var (port, https) in fixedEndpoints)
             {
-                foreach (var uri in parsedUrls)
+                options.Listen(IPAddress.Loopback, port, o =>
                 {
-                    options.Listen(IPAddress.Loopback, uri.Port, o =>
-                    {
-                        if (uri.Scheme == "https")
-                            o.UseHttps();
-                    });
-                }
-                return;
+                    if (https)
+                        o.UseHttps();
+                });
             }
+            return;
         }
 
         var basePort = configuration.GetValue("WorktreeDevPort:BasePort", DefaultBasePort);
@@ -91,6 +107,39 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     }
 
     /// <summary>
+    /// Reads explicit fixed URLs/ports, so they're respected rather than overridden. Returns
+    /// <c>null</c> when none are configured, or when any of them uses a ":0" port. A ":0" port
+    /// means "let the OS pick a dynamic one" -- that's exactly what this package exists to
+    /// replace, so it's treated the same as no URL being configured at all.
+    /// </summary>
+    internal static IReadOnlyList<(int Port, bool Https)>? GetFixedEndpoints(string? urls)
+    {
+        if (string.IsNullOrWhiteSpace(urls))
+            return null;
+
+        var endpoints = new List<(int Port, bool Https)>();
+
+        foreach (var url in urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = UrlPattern.Match(url);
+            if (!match.Success)
+                throw new FormatException($"Unrecognized URL '{url}'. Expected a form like 'https://localhost:5001'.");
+
+            var https = string.Equals(match.Groups["scheme"].Value, "https", StringComparison.OrdinalIgnoreCase);
+            var port = match.Groups["port"].Success
+                ? int.Parse(match.Groups["port"].Value, CultureInfo.InvariantCulture)
+                : https ? 443 : 80;
+
+            if (port == 0)
+                return null;
+
+            endpoints.Add((port, https));
+        }
+
+        return endpoints.Count > 0 ? endpoints : null;
+    }
+
+    /// <summary>
     /// Returns the port already assigned to this worktree, or picks one and saves it so future
     /// runs (and other tools) reuse the same one. The main checkout gets <paramref name="mainWorktreePort"/>
     /// when it's free; every worktree gets the first free port from <paramref name="basePort"/> up,
@@ -98,19 +147,39 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     /// another worktree already has saved.
     /// </summary>
     public static int GetOrAssignPort(int basePort = DefaultBasePort, int rangeSize = DefaultRangeSize, int? mainWorktreePort = DefaultMainWorktreePort)
-    {
-        EnsureGitAlias();
+        => GetOrAssignPort(null, basePort, rangeSize, mainWorktreePort, IsPortFree);
 
-        var gitDirs = GetGitDirs();
+    /// <summary>
+    /// Same as <see cref="GetOrAssignPort(int, int, int?)"/>, but runs git in
+    /// <paramref name="workingDirectory"/> (the current directory when <c>null</c>) and asks
+    /// <paramref name="isPortFree"/> whether a port can be used.
+    /// </summary>
+    internal static int GetOrAssignPort(string? workingDirectory, int basePort, int rangeSize, int? mainWorktreePort, Func<int, bool> isPortFree)
+    {
+        if (basePort < 1 || rangeSize < 1 || basePort + rangeSize - 1 > MaxPort)
+            throw new ArgumentOutOfRangeException(nameof(basePort), $"Port range {basePort}-{basePort + rangeSize - 1} must sit within 1-{MaxPort}.");
+
+        EnsureGitAlias(workingDirectory);
+
+        var gitDirs = GetGitDirs(workingDirectory);
         var portFile = gitDirs is { } dirs ? Path.Combine(dirs.GitDir, PortFileName) : null;
 
-        if (portFile is not null && File.Exists(portFile) && int.TryParse(File.ReadAllText(portFile).Trim(), out var existingPort))
+        if (portFile is not null && ReadPortFile(portFile) is int existingPort)
             return existingPort;
+
+        // Picking and saving must happen as one step, or two worktrees starting at the same
+        // moment can both see the same port as free and both save it.
+        using var assignLock = gitDirs is { } l ? AcquireAssignLock(l.CommonDir) : null;
+
+        // Another process in this same worktree may have saved a port while we waited.
+        if (portFile is not null && ReadPortFile(portFile) is int savedWhileWaiting)
+            return savedWhileWaiting;
 
         var isLinked = gitDirs is { } d && !PathEquals(d.GitDir, d.CommonDir);
         var takenByOthers = gitDirs is { } o ? GetPortsSavedByOtherWorktrees(o.GitDir, o.CommonDir) : [];
 
-        if (mainWorktreePort is int fixedPort && !isLinked && IsPortFree(fixedPort))
+        // null and 0 both mean "no reserved port", matching the Node package.
+        if (mainWorktreePort is int fixedPort and > 0 && !isLinked && isPortFree(fixedPort))
             return SavePort(portFile, fixedPort);
 
         for (var port = basePort; port < basePort + rangeSize; port++)
@@ -118,12 +187,58 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
             if (port == mainWorktreePort || takenByOthers.Contains(port))
                 continue;
 
-            if (IsPortFree(port))
+            if (isPortFree(port))
                 return SavePort(portFile, port);
         }
 
         throw new InvalidOperationException($"No free port found in range {basePort}-{basePort + rangeSize - 1}.");
     }
+
+    /// <summary>
+    /// Takes the repo-wide lock, waiting for whoever holds it. The lock file is deleted when
+    /// the returned handle is disposed. One left behind by a crashed process is removed once
+    /// it's older than <see cref="StaleLockAge"/>.
+    /// </summary>
+    private static IDisposable AcquireAssignLock(string commonDir)
+    {
+        var lockFile = Path.Combine(commonDir, LockFileName);
+        var deadline = DateTime.UtcNow + LockTimeout;
+
+        while (true)
+        {
+            try
+            {
+                return new FileStream(lockFile, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(lockFile) && DateTime.UtcNow - File.GetLastWriteTimeUtc(lockFile) > StaleLockAge)
+                {
+                    try { File.Delete(lockFile); }
+                    catch (IOException) { }
+                    continue;
+                }
+
+                Thread.Sleep(50);
+            }
+            catch (IOException ex)
+            {
+                throw new TimeoutException($"Another process held '{lockFile}' for over {LockTimeout.TotalSeconds:0} seconds. If nothing else is starting, delete that file.", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parses a saved port. Only plain digits in the range 1-65535 count; anything else
+    /// (junk, a sign, a trailing suffix, 0) is treated as no saved port, so a fresh one is picked.
+    /// </summary>
+    internal static int? ParsePort(string text)
+        => int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is >= 1 and <= MaxPort
+            ? port
+            : null;
+
+    private static int? ReadPortFile(string file)
+        => File.Exists(file) ? ParsePort(File.ReadAllText(file)) : null;
 
     private static int SavePort(string? portFile, int port)
     {
@@ -137,11 +252,11 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     /// Adds <c>git wdp-port</c> to the repo's shared config. It lives in the shared .git/config,
     /// so every worktree gets it, and it only needs writing once per clone.
     /// </summary>
-    private static void EnsureGitAlias()
+    private static void EnsureGitAlias(string? workingDirectory)
     {
         var command = $"!cat \"$(git rev-parse --git-path {PortFileName})\" 2>/dev/null";
-        if (RunGit("config", "--get", $"alias.{GitAliasName}") != command)
-            RunGit("config", $"alias.{GitAliasName}", command);
+        if (RunGit(workingDirectory, "config", "--get", $"alias.{GitAliasName}") != command)
+            RunGit(workingDirectory, "config", $"alias.{GitAliasName}", command);
     }
 
     /// <summary>
@@ -160,10 +275,10 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
 
         foreach (var file in portFiles)
         {
-            if (PathEquals(file, ownPortFile) || !File.Exists(file))
+            if (PathEquals(file, ownPortFile))
                 continue;
 
-            if (int.TryParse(File.ReadAllText(file).Trim(), out var port))
+            if (ReadPortFile(file) is int port)
                 ports.Add(port);
         }
 
@@ -176,10 +291,10 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     /// so the two differ. Comparing them avoids relying on "worktrees" appearing in the path,
     /// which the repo's own folder name could also trigger by coincidence.
     /// </summary>
-    private static (string GitDir, string CommonDir)? GetGitDirs()
+    private static (string GitDir, string CommonDir)? GetGitDirs(string? workingDirectory)
     {
-        var gitDir = RunGit("rev-parse", "--path-format=absolute", "--git-dir");
-        var commonDir = RunGit("rev-parse", "--path-format=absolute", "--git-common-dir");
+        var gitDir = RunGit(workingDirectory, "rev-parse", "--path-format=absolute", "--git-dir");
+        var commonDir = RunGit(workingDirectory, "rev-parse", "--path-format=absolute", "--git-common-dir");
 
         // No git repo (or git unavailable) here at all -- treat like the main checkout
         // rather than throwing, matching RunGit's own fail-safe-empty behavior.
@@ -192,7 +307,7 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
     private static bool PathEquals(string a, string b)
         => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.Ordinal);
 
-    private static bool IsPortFree(int port)
+    internal static bool IsPortFree(int port)
     {
         try
         {
@@ -206,13 +321,14 @@ public class WorktreeDevPortKestrelConfiguration(IHostEnvironment hostEnvironmen
         }
     }
 
-    private static string RunGit(params string[] args)
+    private static string RunGit(string? workingDirectory, params string[] args)
     {
         try
         {
             var startInfo = new ProcessStartInfo
             {
                 FileName = "git",
+                WorkingDirectory = workingDirectory ?? "",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
